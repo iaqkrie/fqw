@@ -1,0 +1,105 @@
+@startuml core-class-diagram
+' Диаграмма классов ядра компонентной модели.
+' Упрощенная версия для отчета: без кратностей и подписей на стрелках,
+' чтобы схема оставалась читаемой после экспорта в PNG/SVG/EPS.
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam defaultFontName "Arial"
+skinparam defaultFontSize 14
+skinparam ArrowColor black
+skinparam ClassBorderColor black
+skinparam ClassBackgroundColor white
+skinparam linetype ortho
+skinparam nodesep 90
+skinparam ranksep 90
+hide circle
+hide stereotype
+hide empty members
+
+left to right direction
+
+class Scene {
+  - entities
+  - systems
+  - queries
+  - componentIndex
+  --
+  + addEntity(entity)
+  + removeEntity(entity)
+  + addSystem(system)
+  + query(...)
+  + loop(dtime)
+}
+
+class Entity {
+  - id
+  - components
+  - observer
+  --
+  + addComponent(component)
+  + removeComponent(type)
+  + getComponent(type)
+  + hasComponent(type)
+}
+
+abstract class Component {
+  - entity
+  --
+  + onAttach()
+  + onDetach()
+  + onStart()
+  + onStop()
+  + onDestroy()
+}
+
+abstract class System {
+  - scene
+  - order
+  --
+  + init(scene)
+  + start()
+  + loop(dtime)
+  + stop()
+  + destroy()
+}
+
+class EntityQuery {
+  - componentTypes
+  - entities
+  --
+  + matches(entity)
+  + entities()
+}
+
+interface EntityObserver {
+  + onComponentAdded(...)
+  + onComponentRemoved(...)
+}
+
+' Скрытые связи только для расположения блоков.
+Scene -[hidden]right- Entity
+Entity -[hidden]right- Component
+System -[hidden]right- EntityQuery
+EntityQuery -[hidden]right- EntityObserver
+Scene -[hidden]down- System
+Entity -[hidden]down- EntityQuery
+Component -[hidden]down- EntityObserver
+
+' Основные связи ядра. Без кратностей, чтобы не засорять рисунок.
+Scene *-- Entity
+Scene *-- System
+Scene *-- EntityQuery
+
+Entity *-- Component
+
+System --> Scene
+System --> EntityQuery
+
+Component --> Entity
+
+Entity ..> EntityObserver
+Scene ..|> EntityObserver
+
+@enduml

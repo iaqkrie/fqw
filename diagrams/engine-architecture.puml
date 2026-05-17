@@ -1,0 +1,101 @@
+@startuml engine-architecture
+' Читаемая верхнеуровневая схема архитектуры.
+' Здесь специально показаны только основные зависимости между блоками,
+' без детализации каждой внутренней связи.
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam defaultFontName "Times New Roman"
+skinparam defaultFontSize 16
+skinparam ArrowColor black
+skinparam ComponentBorderColor black
+skinparam PackageBorderColor black
+skinparam linetype ortho
+hide stereotype
+
+top to bottom direction
+
+package "Разрабатываемая программная система" {
+
+  package "Управление приложением" {
+    component "Application" as Application
+    component "EngineConfig" as EngineConfig
+    component "EngineContext" as EngineContext
+  }
+
+  package "Сервисы контекста выполнения" {
+    component "Window" as Window
+    component "Input" as Input
+    component "Time" as Time
+    component "AssetManager" as AssetManager
+    component "SceneManager" as SceneManager
+  }
+
+  package "Модель сцены" {
+    component "Scene" as Scene
+    component "Entity" as Entity
+    component "Component" as Component
+    component "System" as System
+    component "EntityQuery" as EntityQuery
+  }
+
+  package "Подсистемы сцены" {
+    component "RenderSystem" as RenderSystem
+    component "PhysicsSystem" as PhysicsSystem
+    component "ScriptSystem" as ScriptSystem
+    component "DebugRenderSystem" as DebugRenderSystem
+  }
+
+  package "Готовые компоненты" {
+    component "Transform" as Transform
+    component "Camera" as Camera
+    component "MeshRenderer" as MeshRenderer
+    component "Rigidbody" as Rigidbody
+    component "BoxCollider" as BoxCollider
+    component "Script" as Script
+  }
+
+  package "Графические ресурсы" {
+    component "Mesh" as Mesh
+    component "Material" as Material
+    component "Shader" as Shader
+    component "Texture" as Texture
+  }
+}
+
+Application --> EngineConfig
+Application --> EngineContext
+
+EngineContext --> Window
+EngineContext --> Input
+EngineContext --> Time
+EngineContext --> AssetManager
+EngineContext --> SceneManager
+
+SceneManager --> Scene
+
+Scene --> Entity
+Scene --> System
+Scene --> EntityQuery
+Entity --> Component
+
+System --> RenderSystem
+System --> PhysicsSystem
+System --> ScriptSystem
+System --> DebugRenderSystem
+
+Component --> Transform
+Component --> Camera
+Component --> MeshRenderer
+Component --> Rigidbody
+Component --> BoxCollider
+Component --> Script
+
+MeshRenderer --> Mesh
+MeshRenderer --> Material
+Material --> Shader
+Material --> Texture
+
+@enduml

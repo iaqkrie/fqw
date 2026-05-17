@@ -1,0 +1,28 @@
+@startuml frame-lifecycle
+' Упрощенная схема одного кадра приложения.
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName "Times New Roman"
+skinparam defaultFontSize 16
+skinparam ArrowColor black
+skinparam ActivityBorderColor black
+skinparam ActivityBackgroundColor white
+skinparam linetype ortho
+
+start
+:Очистка окна;
+:Обновление времени кадра;
+:Обновление активной сцены;
+:Выполнение ScriptSystem;
+:Выполнение PhysicsSystem;
+:Выполнение RenderSystem;
+:Выполнение DebugRenderSystem;
+:Применение отложенных изменений сцены;
+:Применение отложенной смены сцены;
+:Обновление параметров камер;
+:Обновление состояния ввода;
+:Обмен буферов окна и обработка событий GLFW;
+stop
+
+@enduml

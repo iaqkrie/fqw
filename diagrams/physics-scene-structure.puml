@@ -1,0 +1,134 @@
+@startuml physics-scene-structure
+' Структура демонстрационной сцены PhysicsScene.
+' Версия с жесткой вертикальной компоновкой трех крупных блоков:
+' 1) системы обработки;
+' 2) сущности сцены;
+' 3) назначение систем.
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam defaultFontName "Arial"
+skinparam defaultFontSize 14
+skinparam ArrowColor black
+skinparam ClassBorderColor black
+skinparam ClassBackgroundColor white
+skinparam PackageBorderColor black
+skinparam PackageBackgroundColor white
+skinparam PackageTitleAlignment center
+skinparam linetype ortho
+skinparam nodesep 55
+skinparam ranksep 85
+
+hide circle
+hide stereotype
+hide empty methods
+
+top to bottom direction
+
+package "PhysicsScene" {
+
+  package "Системы обработки" {
+    class "ScriptSystem" as ScriptSystem
+    class "PhysicsSystem" as PhysicsSystem
+    class "RenderSystem" as RenderSystem
+    class "DebugRenderSystem" as DebugRenderSystem
+
+    ScriptSystem -[hidden]right- PhysicsSystem
+    PhysicsSystem -[hidden]right- RenderSystem
+    RenderSystem -[hidden]right- DebugRenderSystem
+  }
+
+  package "Сущности сцены" {
+
+    class "sun" as Sun {
+      DirectionalLight
+    }
+
+    class "camera" as CameraEntity {
+      Transform
+      Camera
+      FreecamController
+    }
+
+    class "static geometry" as StaticGeometry {
+      floor
+      walls
+      narrow-support
+      --
+      Transform
+      BoxCollider
+      MeshRenderer
+    }
+
+    class "dynamic boxes" as DynamicBoxes {
+      Transform
+      Rigidbody
+      BoxCollider
+      MeshRenderer
+    }
+
+    class "kinematic platform" as Platform {
+      Transform
+      Rigidbody
+      BoxCollider
+      MeshRenderer
+      PlatformBounceScript
+    }
+
+    class "physics grid" as Grid {
+      PhysicsGridScript
+    }
+
+    class "scene controls" as Controls {
+      PhysicsSceneControlScript
+    }
+
+    Sun -[hidden]right- CameraEntity
+    CameraEntity -[hidden]right- StaticGeometry
+    StaticGeometry -[hidden]right- DynamicBoxes
+    DynamicBoxes -[hidden]right- Platform
+
+    Grid -[hidden]right- Controls
+    Sun -[hidden]down- Grid
+    CameraEntity -[hidden]down- Controls
+  }
+
+  package "Назначение систем" {
+    class "ScriptSystem" as PurposeScript {
+      выполняет пользовательские скрипты
+    }
+
+    class "PhysicsSystem" as PurposePhysics {
+      обновляет физические тела
+      обрабатывает столкновения
+    }
+
+    class "RenderSystem" as PurposeRender {
+      отображает визуальные объекты
+      использует камеру и свет
+    }
+
+    class "DebugRenderSystem" as PurposeDebug {
+      отображает отладочную геометрию
+    }
+
+    PurposeScript -[hidden]right- PurposePhysics
+    PurposePhysics -[hidden]right- PurposeRender
+    PurposeRender -[hidden]right- PurposeDebug
+  }
+
+  ' Жесткая вертикальная привязка:
+  ' блок систем -> блок сущностей -> блок назначения.
+  ScriptSystem -[hidden]down-> Sun
+  PhysicsSystem -[hidden]down-> CameraEntity
+  RenderSystem -[hidden]down-> StaticGeometry
+  DebugRenderSystem -[hidden]down-> Platform
+
+  Grid -[hidden]down-> PurposeScript
+  Controls -[hidden]down-> PurposePhysics
+  DynamicBoxes -[hidden]down-> PurposeRender
+  Platform -[hidden]down-> PurposeDebug
+}
+
+@enduml
