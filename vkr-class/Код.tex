@@ -1,0 +1,1518 @@
+\appendix{Фрагменты исходного кода программы}
+
+В приложении приведены основные фрагменты исходного кода разработанной программной системы. Листинги выбраны таким образом, чтобы показать реализацию компонентной модели, жизненного цикла приложения и сцены, графической подсистемы, подсистемы ввода, скриптов, физической подсистемы, демонстрационного использования и тестирования.
+\newpage
+\noindent\textbf{Листинг Б.1 -- базовый класс компонента Component.java}
+\begin{lstlisting}[language=Java, frame=single]
+package qchromatic.jecse.core;
+
+public abstract class Component {
+	protected Entity entity;
+	private boolean _started;
+	private boolean _destroyed;
+
+	public Entity entity () { return entity; }
+
+	public boolean started () { return _started; }
+
+	public boolean destroyed () { return _destroyed; }
+
+	public void onAttach () { }
+
+	public void onDetach () { }
+
+	public void onStart () { }
+
+	public void onStop () { }
+
+	public void onDestroy () { }
+
+	final void attach (Entity entity) {
+		if (this.entity == entity)
+			return;
+
+		if (this.entity != null && this.entity != entity)
+			throw new IllegalStateException("Component is already attached to another entity");
+
+		this.entity = entity;
+		_destroyed = false;
+		onAttach();
+	}
+
+	final void detach (Entity entity) {
+		if (this.entity == entity) {
+			stopInternal();
+			onDetach();
+			this.entity = null;
+		}
+	}
+
+	final void startInternal () {
+		if (_started || _destroyed) return;
+
+		_started = true;
+		onStart();
+	}
+
+	final void stopInternal () {
+		if (!_started) return;
+
+		_started = false;
+		onStop();
+	}
+
+	final void destroyInternal () {
+		if (_destroyed) return;
+
+		stopInternal();
+		_destroyed = true;
+		onDestroy();
+
+		if (this instanceof Disposable disposable)
+			disposable.destroy();
+	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.2 -- базовый класс системы обработки System.java}
+\begin{lstlisting}[language=Java, frame=single]
+package qchromatic.jecse.core;
+
+import qchromatic.jecse.engine.Scene;
+
+public abstract class System {
+	protected Scene scene;
+	private int _order;
+
+	public System () { this(0); }
+
+	protected System (int order) {
+		_order = order;
+	}
+
+	public void init () { }
+	public void start () { }
+	public void loop (float dtime) { }
+	public void stop () { }
+
+	public void destroy () { }
+
+	public void onEntityAdded (Entity entity) { }
+	public void onEntityRemoved (Entity entity) { }
+
+	public void onComponentAdded (Entity entity, Component component) { }
+	public void onComponentRemoved (Entity entity, Component component) { }
+
+	public int order () { return _order; }
+
+	public System order (int order) {
+		_order = order;
+		return this;
+	}
+
+	public System scene (Scene scene) {
+		if (scene == null) return this;
+
+		this.scene = scene;
+		return this;
+	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.3 -- сущность и управление компонентами Entity.java}
+\begin{lstlisting}[language=Java, frame=single]
+package qchromatic.jecse.core;
+
+import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
+
+public class Entity {
+	private static final AtomicLong NEXT_ID = new AtomicLong(1);
+
+	private final String _id;
+	private final Map<Class<? extends Component>, Component> _components;
+
+	private EntityObserver _observer;
+
+	public Entity () { this("entity-" + NEXT_ID.getAndIncrement()); }
+	public Entity (String id) {
+		if (id == null || id.isBlank())
+			throw new IllegalArgumentException("Entity id cannot be null or blank");
+
+		_id = id;
+		_components = new LinkedHashMap<>();
+	}
+
+	public String id () { return _id; }
+
+	public void observer (EntityObserver observer) { _observer = observer; }
+
+	public <T extends Component> Entity addComponent (T component) {
+		if (component == null)
+			throw new IllegalArgumentException("Component cannot be null");
+
+		if (component.entity != null && component.entity != this)
+			throw new IllegalStateException("Component is already attached to another entity");
+
+		if (_components.containsKey(component.getClass()))
+			throw new IllegalStateException("Entity already has component: " + component.getClass().getName());
+
+		component.attach(this);
+		_components.put(component.getClass(), component);
+
+		if (_observer != null)
+			_observer.onComponentAdded(this, component);
+
+		return this;
+	}
+
+	public Component[] getAllComponents () {
+		return _components.values().toArray(new Component[0]);
+	}
+
+	public Collection<Component> components () {
+		return Collections.unmodifiableCollection(_components.values());
+	}
+
+	public void detachAllComponents () {
+		for (Component component : _components.values())
+			component.detach(this);
+	}
+
+	public void attachAllComponents () {
+		for (Component component : _components.values())
+			component.attach(this);
+	}
+
+	public void startComponents () {
+		for (Component component : _components.values())
+			component.startInternal();
+	}
+
+	public void stopComponents () {
+		for (Component component : _components.values())
+			component.stopInternal();
+	}
+
+	public void destroyComponents () {
+		for (Component component : _components.values())
+			component.destroyInternal();
+	}
+
+	public void startComponent (Component component) {
+		if (component != null && _components.containsValue(component))
+			component.startInternal();
+	}
+
+	public <T extends Component> T getComponent (Class<T> componentClass) {
+		if (componentClass == null) return null;
+		return componentClass.cast(_components.get(componentClass));
+	}
+
+	public <T extends Component> List<T> getComponentsInheritance(Class<T> componentClass) {
+		List<T> result = new ArrayList<>();
+		for (Component component : _components.values()) {
+			if (componentClass.isAssignableFrom(component.getClass())) {
+				result.add(componentClass.cast(component));
+			}
+		}
+
+		return result;
+	}
+
+	public boolean hasComponent (Class<? extends Component> componentClass) {
+		if (componentClass == null) return false;
+		return _components.containsKey(componentClass);
+	}
+
+	public boolean hasComponentInheritance(Class<? extends Component> componentClass) {
+		if (componentClass == null) return false;
+
+		for (Component component : _components.values()) {
+			if (componentClass.isAssignableFrom(component.getClass())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public void removeComponent (Class<? extends Component> componentClass) {
+		if (componentClass == null) return;
+
+		Component component = _components.remove(componentClass);
+
+		if (component == null) return;
+
+		if (_observer != null)
+			_observer.onComponentRemoved(this, component);
+		else
+			finishComponentRemoval(component);
+	}
+
+	public void finishComponentRemoval (Component component) {
+		if (component == null) return;
+		component.destroyInternal();
+		component.detach(this);
+	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.4 -- фрагменты управления сценой Scene.java}
+\begin{lstlisting}[language=Java, frame=single]
+public final class Scene {
+    	public void init () {
+    		ensureNotDisposed();
+    		initializeIfNeeded();
+    		start();
+    	}
+
+    	public void start () {
+    		ensureNotDisposed();
+    		initializeIfNeeded();
+
+    		if (_running) return;
+
+    		_running = true;
+    		for (Entity entity : entitySnapshot())
+    			entity.startComponents();
+
+    		for (System system : systemSnapshot())
+    			system.start();
+
+    		flushStructuralChanges();
+    	}
+
+    	public void loop (float dtime) {
+    		if (!_running) return;
+
+    		flushStructuralChanges();
+
+    		_updating = true;
+    		try {
+    			for (System system : systemSnapshot())
+    				system.loop(dtime);
+    		} finally {
+    			_updating = false;
+    		}
+
+    		flushStructuralChanges();
+    	}
+
+    	public void stop () {
+    		if (!_running) return;
+
+    		flushStructuralChanges();
+    		_running = false;
+
+    		for (System system : systemSnapshot())
+    			system.stop();
+
+    		for (Entity entity : entitySnapshot())
+    			entity.stopComponents();
+    	}
+
+    	public void dispose () {
+    		if (_disposed) return;
+
+    		stop();
+
+    		for (System system : systemSnapshot())
+    			system.destroy();
+
+    		for (Entity entity : entitySnapshot())
+    			disposeEntity(entity);
+
+    		_pendingStructuralChanges.clear();
+    		_componentIndex.clear();
+    		_queries.clear();
+    		_systems.clear();
+    		_systemMap.clear();
+    		_entities.clear();
+
+    		_initialized = false;
+    		_disposed = true;
+    	}
+
+    	public void addEntity (Entity entity) {
+    		ensureNotDisposed();
+    		if (entity == null)
+    			throw new IllegalArgumentException("Entity cannot be null");
+
+    		if (_updating || _flushingStructuralChanges) {
+    			_pendingStructuralChanges.add(() -> addEntityNow(entity));
+    			return;
+    		}
+
+    		addEntityNow(entity);
+    	}
+
+    	public void removeEntity (String id) {
+    		ensureNotDisposed();
+
+    		if (_updating || _flushingStructuralChanges) {
+    			_pendingStructuralChanges.add(() -> removeEntityNow(id));
+    			return;
+    		}
+
+    		removeEntityNow(id);
+    	}
+
+    	public void addSystem (System system) {
+    		ensureNotDisposed();
+    		if (system == null)
+    			throw new IllegalArgumentException("System cannot be null");
+
+    		if (_updating || _flushingStructuralChanges) {
+    			_pendingStructuralChanges.add(() -> addSystemNow(system));
+    			return;
+    		}
+
+    		addSystemNow(system);
+    	}
+
+    	public void removeSystem (Class<? extends System> systemClass) {
+    		ensureNotDisposed();
+
+    		if (_updating || _flushingStructuralChanges) {
+    			_pendingStructuralChanges.add(() -> removeSystemNow(systemClass));
+    			return;
+    		}
+
+    		removeSystemNow(systemClass);
+    	}
+
+    	public final EntityQuery query (Class<? extends Component>... componentClasses) {
+    		return createQuery(false, Arrays.asList(componentClasses));
+    	}
+
+    	public final EntityQuery queryInheritance (Class<? extends Component>... componentClasses) {
+    		return createQuery(true, Arrays.asList(componentClasses));
+    	}
+
+    	private void flushStructuralChanges () {
+    		if (_flushingStructuralChanges || _pendingStructuralChanges.isEmpty()) return;
+
+    		_flushingStructuralChanges = true;
+    		try {
+    			while (!_pendingStructuralChanges.isEmpty()) {
+    				List<Runnable> changes = List.copyOf(_pendingStructuralChanges);
+    				_pendingStructuralChanges.clear();
+
+    				for (Runnable change : changes)
+    					change.run();
+    			}
+    		} finally {
+    			_flushingStructuralChanges = false;
+    		}
+    	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.5 -- главный цикл приложения Application.java}
+\begin{lstlisting}[language=Java, frame=single]
+	public void run (Scene startScene) {
+		_context.use();
+
+		try {
+			if (startScene != null)
+				_context.sceneManager().load(startScene);
+			else if (!_context.sceneManager().hasActiveScene())
+				throw new RuntimeException("No start scene");
+
+			updateCameraAspect();
+			_window.show();
+
+			_context.time().reset((float) glfwGetTime());
+			while (!_window.shouldClose()) {
+				_window.clear(_context.config().clearColor());
+
+				float currentTime = (float) glfwGetTime();
+				_context.time().update(currentTime);
+				_context.sceneManager().activeScene().loop(_context.time().deltaTime());
+				_context.sceneManager().applyPendingChanges();
+				updateCameraAspect();
+				_context.input().update();
+				_window.update();
+			}
+		} finally {
+			_context.destroy();
+		}
+	}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.6 -- управление сменой сцен SceneManager.java}
+\begin{lstlisting}[language=Java, frame=single]
+package qchromatic.jecse.engine;
+
+public final class SceneManager {
+	private static final SceneManager DEFAULT = new SceneManager();
+
+	private Scene _activeScene;
+	private Scene _pendingScene;
+	private boolean _pendingReplace;
+
+	public Scene activeScene () {
+		if (_activeScene == null) throw new RuntimeException("No active scene");
+		return _activeScene;
+	}
+
+	public boolean hasActiveScene () {
+		return _activeScene != null;
+	}
+
+	public void load (Scene scene) {
+		if (scene == null) return;
+		clearPendingChange();
+
+		if (_activeScene == scene) {
+			_activeScene.start();
+			return;
+		}
+
+		if (_activeScene != null)
+			_activeScene.stop();
+
+		_activeScene = scene;
+		_activeScene.start();
+	}
+
+	public void replace (Scene scene) {
+		if (scene == null) return;
+		clearPendingChange();
+
+		if (_activeScene == scene) {
+			_activeScene.start();
+			return;
+		}
+
+		if (_activeScene != null) {
+			Scene previousScene = _activeScene;
+			_activeScene = null;
+			previousScene.dispose();
+		}
+
+		_activeScene = scene;
+		_activeScene.start();
+	}
+
+	public void requestLoad (Scene scene) {
+		if (scene == null) return;
+
+		_pendingScene = scene;
+		_pendingReplace = false;
+	}
+
+	public void requestReplace (Scene scene) {
+		if (scene == null) return;
+
+		_pendingScene = scene;
+		_pendingReplace = true;
+	}
+
+	public void applyPendingChanges () {
+		if (_pendingScene == null) return;
+
+		Scene scene = _pendingScene;
+		boolean replace = _pendingReplace;
+		clearPendingChange();
+
+		if (replace)
+			replace(scene);
+		else
+			load(scene);
+	}
+
+	public void unload () {
+		if (_activeScene == null) return;
+		clearPendingChange();
+
+		_activeScene.stop();
+		_activeScene = null;
+	}
+
+	public void disposeActiveScene () {
+		if (_activeScene == null) return;
+		clearPendingChange();
+
+		Scene scene = _activeScene;
+		_activeScene = null;
+		scene.dispose();
+	}
+
+	public static Scene getActiveScene () {
+		return currentManager().activeScene();
+	}
+
+	public static boolean hasScene () {
+		return currentManager().hasActiveScene();
+	}
+
+	public static void loadScene (Scene scene) {
+		currentManager().load(scene);
+	}
+
+	public static void replaceScene (Scene scene) {
+		currentManager().replace(scene);
+	}
+
+	public static void requestLoadScene (Scene scene) {
+		currentManager().requestLoad(scene);
+	}
+
+	public static void requestReplaceScene (Scene scene) {
+		currentManager().requestReplace(scene);
+	}
+
+	public static void unloadScene () {
+		currentManager().unload();
+	}
+
+	public static void disposeScene () {
+		currentManager().disposeActiveScene();
+	}
+
+	private static SceneManager currentManager () {
+		EngineContext context = EngineContext.currentOrNull();
+		return context == null ? DEFAULT : context.sceneManager();
+	}
+
+	private void clearPendingChange () {
+		_pendingScene = null;
+		_pendingReplace = false;
+	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.7 -- фрагменты графической подсистемы RenderSystem.java}
+\begin{lstlisting}[language=Java, frame=single]
+public final class RenderSystem {
+    	public void init () {
+    		_renderables = scene.query(Transform.class, MeshRenderer.class);
+    		_cameras = scene.query(Transform.class, Camera.class);
+    		_lights = scene.query(DirectionalLight.class);
+    	}
+
+    	public void loop (float dtime) {
+    		Entity cameraEntity = selectCamera();
+    		if (cameraEntity == null) return;
+
+    		Camera camera = cameraEntity.getComponent(Camera.class);
+    		LightState light = selectLight();
+
+    		buildRenderQueue(camera);
+    		sortRenderQueue();
+
+    		for (RenderCommand command : _renderQueue)
+    			renderCommand(command, camera, light);
+
+    		checkOpenGLErrors();
+    	}
+
+    	private Entity selectCamera () {
+    		Entity selected = null;
+    		int selectedPriority = Integer.MIN_VALUE;
+
+    		for (Entity entity : _cameras) {
+    			Camera camera = entity.getComponent(Camera.class);
+    			if (camera == null || !camera.enabled()) continue;
+
+    			if (selected == null || camera.priority() > selectedPriority) {
+    				selected = entity;
+    				selectedPriority = camera.priority();
+    			}
+    		}
+
+    		return selected;
+    	}
+
+    	private LightState selectLight () {
+    		for (Entity entity : _lights) {
+    			DirectionalLight light = entity.getComponent(DirectionalLight.class);
+    			if (light != null && light.enabled())
+    				return new LightState(light.direction(), light.color().multiplied(light.intensity()), true);
+    		}
+
+    		return new LightState(new Vec3(0f, -1f, 0f), new Vec4(1f), false);
+    	}
+
+    	private void buildRenderQueue (Camera camera) {
+    		_renderQueue.clear();
+
+    		for (Entity entity : _renderables) {
+    			MeshRenderer meshRenderer = entity.getComponent(MeshRenderer.class);
+    			Transform transform = entity.getComponent(Transform.class);
+
+    			if (meshRenderer == null || transform == null || !meshRenderer.enabled()) continue;
+    			if ((camera.cullingMask() & meshRenderer.layer()) == 0) continue;
+
+    			Mesh mesh = meshRenderer.mesh();
+    			Material material = meshRenderer.material();
+
+    			if (mesh == null || material == null) continue;
+    			if (!isVisible(camera, transform, meshRenderer)) continue;
+
+    			_renderQueue.add(new RenderCommand(mesh, material, transform, meshRenderer.renderQueue()));
+    		}
+    	}
+
+    	private void sortRenderQueue () {
+    		_renderQueue.sort(Comparator
+    				.comparingInt((RenderCommand command) -> command.renderQueue)
+    				.thenComparingInt(command -> command.material.shader().handler())
+    				.thenComparingInt(command -> command.material.texture().id())
+    				.thenComparingInt(command -> java.lang.System.identityHashCode(command.mesh)));
+    	}
+
+    	private void renderCommand (RenderCommand command, Camera camera, LightState light) {
+    		MeshGpuResource resource = getMeshGpuResource(command.mesh);
+    		Material material = command.material;
+
+    		material.use();
+
+    		Shader shader = material.shader();
+    		shader.setUniform("u_model", command.transform.getModelMatrix().transposed());
+    		shader.setUniform("u_view", camera.getViewMatrix().transposed());
+    		shader.setUniform("u_projection", camera.getProjectionMatrix().transposed());
+    		shader.setUniform("u_lightDirection", light.direction);
+    		shader.setUniform("u_lightColor", light.color);
+    		shader.setUniform("u_ambientColor", _ambientColor);
+    		shader.setUniform("u_lit", light.enabled);
+
+    		glBindVertexArray(resource.vaoId());
+    		glDrawElements(GL_TRIANGLES, resource.indexCount(), GL_UNSIGNED_INT, 0);
+    		glBindVertexArray(0);
+    	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.8 -- фрагменты физической подсистемы PhysicsSystem.java}
+\begin{lstlisting}[language=Java, frame=single]
+public final class PhysicsSystem {
+    	public void loop (float dtime) {
+    		if (dtime <= 0f) return;
+
+    		_accumulator += Math.min(dtime, _fixedTimeStep * _maxSubSteps);
+
+    		int steps = 0;
+    		while (_accumulator >= _fixedTimeStep && steps < _maxSubSteps) {
+    			step(_fixedTimeStep);
+    			_accumulator -= _fixedTimeStep;
+    			steps++;
+    		}
+
+    		if (steps == _maxSubSteps && _accumulator >= _fixedTimeStep)
+    			_accumulator = 0f;
+
+    		if (_debugDrawColliders)
+    			drawColliderBounds();
+    	}
+
+    	private void step (float dtime) {
+    		integrateForces(dtime);
+    		integrateTransforms(dtime);
+    		solveVelocity();
+    		solvePosition();
+    		updateSleeping(dtime);
+    	}
+
+    	private void integrateForces (float dtime) {
+    		for (Entity entity : _bodies) {
+    			Transform transform = entity.getComponent(Transform.class);
+    			Rigidbody body = entity.getComponent(Rigidbody.class);
+    			if (transform == null || body == null || !body.enabled()) continue;
+
+    			if (body.staticBody()) {
+    				body.velocity(0f, 0f, 0f);
+    				body.angularVelocity(0f, 0f, 0f);
+    				body.clearForces();
+    				continue;
+    			}
+
+    			if (body.sleeping()) {
+    				body.clearForces();
+    				continue;
+    			}
+
+    			if (body.dynamic()) {
+    				Vec3 velocity = body.velocity();
+    				Vec3 acceleration = body.force().multiplied(body.inverseMass());
+    				if (body.useGravity())
+    					acceleration.add(_gravity.multiplied(body.gravityScale()));
+
+    				velocity.add(acceleration.multiplied(dtime));
+    				velocity.mul(Math.max(0f, 1f - body.linearDamping() * dtime));
+    				body.velocity(velocity);
+
+    				Vec3 angularVelocity = body.angularVelocity();
+    				if (!body.lockRotation()) {
+    					Vec3 angularAcceleration = applyInverseInertia(entity, transform, body, body.torque());
+    					angularVelocity.add(angularAcceleration.multiplied(dtime));
+    					angularVelocity.mul(Math.max(0f, 1f - body.angularDamping() * dtime));
+    					body.angularVelocity(angularVelocity);
+    				} else {
+    					body.angularVelocity(0f, 0f, 0f);
+    				}
+    			}
+
+    			clampBodySpeeds(body);
+    			body.clearForces();
+    		}
+    	}
+
+    	private void integrateTransforms (float dtime) {
+    		for (Entity entity : _bodies) {
+    			Transform transform = entity.getComponent(Transform.class);
+    			Rigidbody body = entity.getComponent(Rigidbody.class);
+    			if (transform == null || body == null || !body.enabled() || body.staticBody() || body.sleeping()) continue;
+
+    			transform.position(transform.position().added(body.velocity().multiplied(dtime)));
+
+    			Vec3 angularVelocity = body.angularVelocity();
+    			if (!body.lockRotation() && angularVelocity.lengthSquared() > 0f) {
+    				float angleRad = angularVelocity.length() * dtime;
+    				Vec3 axis = angularVelocity.normalized();
+    				Quaternion delta = Quaternion.axisAngle(axis, (float) Math.toDegrees(angleRad));
+    				transform.rotation(delta.multiplied(transform.rotation()).normalized());
+    			}
+    		}
+    	}
+
+    	private List<Contact> contacts () {
+    		List<ColliderEntry> entries = colliderEntries();
+    		List<Contact> result = new ArrayList<>();
+
+    		for (int i = 0; i < entries.size(); i++) {
+    			for (int j = i + 1; j < entries.size(); j++) {
+    				ColliderEntry a = entries.get(i);
+    				ColliderEntry b = entries.get(j);
+
+    				if (!canCollide(a.collider, b.collider)) continue;
+
+    				Contact contact = contact(a, b);
+    				if (contact != null)
+    					result.add(contact);
+    			}
+    		}
+
+    		return result;
+    	}
+
+    	private Contact contact (ColliderEntry a, ColliderEntry b) {
+    		if (!aabbOverlap(a.shape, b.shape)) return null;
+
+    		SatResult result = new SatResult();
+    		Vec3 centerDelta = subtract(b.shape.center, a.shape.center);
+
+    		for (int i = 0; i < 3; i++) {
+    			if (!testAxis(a.shape.axes[i], centerDelta, a.shape, b.shape, result)) return null;
+    			if (!testAxis(b.shape.axes[i], centerDelta, a.shape, b.shape, result)) return null;
+    		}
+
+    		for (int i = 0; i < 3; i++) {
+    			for (int j = 0; j < 3; j++) {
+    				Vec3 axis = a.shape.axes[i].crossed(b.shape.axes[j]);
+    				if (axis.lengthSquared() > EPSILON && !testAxis(axis, centerDelta, a.shape, b.shape, result))
+    					return null;
+    			}
+    		}
+
+    		if (result.normal.lengthSquared() <= 0f)
+    			return null;
+
+    		return new Contact(a, b, result.normal, result.penetration, contactPoints(a.shape, b.shape, result.normal, result.penetration));
+    	}
+
+    	private boolean testAxis (Vec3 axis, Vec3 centerDelta, BoxShape a, BoxShape b, SatResult result) {
+    		Vec3 normal = axis.normalized();
+    		float radiusA = projectionRadius(a, normal);
+    		float radiusB = projectionRadius(b, normal);
+    		float distance = centerDelta.dot(normal);
+    		float overlap = radiusA + radiusB - Math.abs(distance);
+
+    		if (overlap <= 0f)
+    			return false;
+
+    		if (overlap < result.penetration) {
+    			result.penetration = overlap;
+    			result.normal = distance >= 0f ? normal : normal.multiplied(-1f);
+    		}
+
+    		return true;
+    	}
+
+    	private void resolveVelocityAtPoint (Contact contact, Vec3 point) {
+    		float invMassA = inverseMass(contact.a.body);
+    		float invMassB = inverseMass(contact.b.body);
+    		Vec3 centerA = worldCenterOfMass(contact.a);
+    		Vec3 centerB = worldCenterOfMass(contact.b);
+    		Vec3 rA = subtract(point, centerA);
+    		Vec3 rB = subtract(point, centerB);
+
+    		Vec3 relativeVelocity = subtract(pointVelocity(contact.b, rB), pointVelocity(contact.a, rA));
+    		float velocityAlongNormal = relativeVelocity.dot(contact.normal);
+    		float velocityBias = contactVelocityBias(contact, velocityAlongNormal);
+    		if (velocityAlongNormal >= velocityBias)
+    			return;
+
+    		float denominator = invMassA + invMassB
+    				+ angularDenominator(contact.a, rA, contact.normal)
+    				+ angularDenominator(contact.b, rB, contact.normal);
+    		if (denominator <= 0f)
+    			return;
+
+    		float impulseMagnitude = (velocityBias - velocityAlongNormal) / denominator;
+    		applyImpulse(contact.a, contact.normal.multiplied(-impulseMagnitude), point);
+    		applyImpulse(contact.b, contact.normal.multiplied(impulseMagnitude), point);
+
+    		relativeVelocity = subtract(pointVelocity(contact.b, rB), pointVelocity(contact.a, rA));
+    		Vec3 tangent = subtract(relativeVelocity, contact.normal.multiplied(relativeVelocity.dot(contact.normal)));
+    		if (tangent.lengthSquared() > EPSILON) {
+    			tangent.normalize();
+    			float tangentDenominator = invMassA + invMassB
+    					+ angularDenominator(contact.a, rA, tangent)
+    					+ angularDenominator(contact.b, rB, tangent);
+    			if (tangentDenominator > 0f) {
+    				float tangentImpulseMagnitude = -relativeVelocity.dot(tangent) / tangentDenominator;
+    				float friction = (float) Math.sqrt(contact.a.collider.friction() * contact.b.collider.friction());
+    				float maxFriction = Math.abs(impulseMagnitude) * friction;
+    				tangentImpulseMagnitude = clamp(tangentImpulseMagnitude, -maxFriction, maxFriction);
+
+    				applyImpulse(contact.a, tangent.multiplied(-tangentImpulseMagnitude), point);
+    				applyImpulse(contact.b, tangent.multiplied(tangentImpulseMagnitude), point);
+    			}
+    		}
+    	}
+
+    	private void resolvePosition (Contact contact) {
+    		float invMassA = inverseMass(contact.a.body);
+    		float invMassB = inverseMass(contact.b.body);
+    		float invMassSum = invMassA + invMassB;
+    		if (invMassSum <= 0f) return;
+
+    		float percent = 0.2f;
+    		float correction = Math.min(0.05f, Math.max(0f, contact.penetration - POSITION_SLOP) * percent);
+    		if (correction <= 0f) return;
+
+    		if (invMassA > 0f)
+    			move(contact.a.transform, contact.normal.multiplied(-correction * invMassA / invMassSum));
+    		if (invMassB > 0f)
+    			move(contact.b.transform, contact.normal.multiplied(correction * invMassB / invMassSum));
+    	}
+
+    	private void updateSleeping (float dtime) {
+    		Map<Rigidbody, Boolean> supported = new IdentityHashMap<>();
+    		Map<Rigidbody, Boolean> touchedByActiveBody = new IdentityHashMap<>();
+    		for (Contact contact : contacts()) {
+    			if (contact.a.collider.trigger() || contact.b.collider.trigger()) continue;
+    			if (isSupported(contact, contact.a, contact.normal.multiplied(-1f)) && isStableSupport(contact.b.body))
+    				supported.put(contact.a.body, true);
+    			if (isSupported(contact, contact.b, contact.normal) && isStableSupport(contact.a.body))
+    				supported.put(contact.b.body, true);
+    			if (isActiveBody(contact.b.body) && contact.a.body != null)
+    				touchedByActiveBody.put(contact.a.body, true);
+    			if (isActiveBody(contact.a.body) && contact.b.body != null)
+    				touchedByActiveBody.put(contact.b.body, true);
+    		}
+
+    		for (Entity entity : _bodies) {
+    			Rigidbody body = entity.getComponent(Rigidbody.class);
+    			if (body == null || !body.enabled() || !body.dynamic()) continue;
+
+    			if (!supported.containsKey(body)) {
+    				_sleepTimers.remove(body);
+    				if (body.sleeping())
+    					body.wakeUp();
+    				continue;
+    			}
+
+    			if (touchedByActiveBody.containsKey(body)) {
+    				_sleepTimers.remove(body);
+    				if (body.sleeping())
+    					body.wakeUp();
+    				continue;
+    			}
+
+    			boolean slow = body.velocity().lengthSquared() <= _sleepLinearThreshold * _sleepLinearThreshold
+    					&& body.angularVelocity().lengthSquared() <= _sleepAngularThreshold * _sleepAngularThreshold;
+    			if (!slow) {
+    				_sleepTimers.remove(body);
+    				continue;
+    			}
+
+    			float sleepTime = _sleepTimers.getOrDefault(body, 0f) + dtime;
+    			_sleepTimers.put(body, sleepTime);
+    			if (sleepTime >= _sleepDelay)
+    				body.sleep();
+    		}
+    	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.9 -- выполнение пользовательских скриптов ScriptSystem.java}
+\begin{lstlisting}[language=Java, frame=single]
+package qchromatic.jecse.system;
+
+import qchromatic.jecse.component.Script;
+import qchromatic.jecse.core.Component;
+import qchromatic.jecse.core.Entity;
+import qchromatic.jecse.core.EntityQuery;
+import qchromatic.jecse.core.System;
+
+import java.util.*;
+
+public class ScriptSystem extends System {
+	private final List<Script> _scripts;
+	private final Set<Script> _initializedScripts;
+	private final Set<Script> _startedScripts;
+	private final Map<Entity, List<Script>> _scriptsByEntity;
+	private EntityQuery _scriptEntities;
+	private boolean _running;
+
+	public ScriptSystem () {
+		super(0);
+		_scripts = new ArrayList<>();
+		_initializedScripts = new LinkedHashSet<>();
+		_startedScripts = new LinkedHashSet<>();
+		_scriptsByEntity = new LinkedHashMap<>();
+		_running = false;
+	}
+
+	@Override
+	public void init () {
+		_scriptEntities = scene.queryInheritance(Script.class);
+		_scripts.clear();
+		_initializedScripts.clear();
+		_startedScripts.clear();
+		_scriptsByEntity.clear();
+
+		for (Entity entity : _scriptEntities)
+			registerEntity(entity);
+	}
+
+	@Override
+	public void start () {
+		_running = true;
+		for (Script script : List.copyOf(_scripts))
+			startScript(script);
+	}
+
+	@Override
+	public void loop (float dtime) {
+		for (Script script : List.copyOf(_scripts))
+			script.loop(dtime);
+	}
+
+	@Override
+	public void stop () {
+		_running = false;
+		for (Script script : List.copyOf(_startedScripts))
+			stopScript(script);
+	}
+
+	@Override
+	public void destroy () {
+		for (Script script : List.copyOf(_scripts))
+			destroyScript(script);
+
+		_scripts.clear();
+		_initializedScripts.clear();
+		_startedScripts.clear();
+		_scriptsByEntity.clear();
+	}
+
+	@Override
+	public void onEntityAdded (Entity entity) {
+		registerEntity(entity);
+	}
+
+	@Override
+	public void onEntityRemoved (Entity entity) {
+		unregisterEntity(entity, true);
+	}
+
+	@Override
+	public void onComponentAdded(Entity entity, Component component) {
+		if (component instanceof Script script)
+			registerScript(entity, script);
+	}
+
+	@Override
+	public void onComponentRemoved(Entity entity, Component component) {
+		if (component instanceof Script script)
+			unregisterScript(entity, script, true);
+	}
+
+	private void registerEntity (Entity entity) {
+		for (Script script : entity.getComponentsInheritance(Script.class))
+			registerScript(entity, script);
+	}
+
+	private void registerScript (Entity entity, Script script) {
+		List<Script> entityScripts = _scriptsByEntity.computeIfAbsent(entity, ignored -> new ArrayList<>());
+		if (entityScripts.contains(script)) return;
+
+		entityScripts.add(script);
+		_scripts.add(script);
+		initScript(script);
+
+		if (_running)
+			startScript(script);
+	}
+
+	private void unregisterEntity (Entity entity, boolean destroy) {
+		List<Script> entityScripts = _scriptsByEntity.remove(entity);
+		if (entityScripts == null) return;
+
+		for (Script script : List.copyOf(entityScripts))
+			unregisterScript(entity, script, destroy);
+	}
+
+	private void unregisterScript (Entity entity, Script script, boolean destroy) {
+		List<Script> entityScripts = _scriptsByEntity.get(entity);
+		if (entityScripts != null) {
+			entityScripts.remove(script);
+			if (entityScripts.isEmpty())
+				_scriptsByEntity.remove(entity);
+		}
+
+		_scripts.remove(script);
+
+		if (destroy)
+			destroyScript(script);
+	}
+
+	private void initScript (Script script) {
+		if (_initializedScripts.add(script))
+			script.init();
+	}
+
+	private void startScript (Script script) {
+		initScript(script);
+		if (_startedScripts.add(script))
+			script.start();
+	}
+
+	private void stopScript (Script script) {
+		if (_startedScripts.remove(script))
+			script.stop();
+	}
+
+	private void destroyScript (Script script) {
+		stopScript(script);
+
+		if (_initializedScripts.remove(script))
+			script.destroy();
+	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.10 -- обработка пользовательского ввода InputState.java}
+\begin{lstlisting}[language=Java, frame=single]
+package qchromatic.jecse.engine;
+
+import qchromatic.jecse.common.Vec2;
+
+public final class InputState {
+	private static final int MAX_KEYS = 512;
+	private static final int MAX_MOUSE_BUTTONS = 16;
+
+	private final boolean[] _keys;
+	private final boolean[] _keysPrev;
+	private final boolean[] _mouseButtons;
+	private final boolean[] _mouseButtonsPrev;
+
+	private float _mouseX;
+	private float _mouseY;
+	private float _mouseDX;
+	private float _mouseDY;
+	private boolean _hasMousePosition;
+	private float _scrollX;
+	private float _scrollY;
+
+	public InputState () {
+		_keys = new boolean[MAX_KEYS];
+		_keysPrev = new boolean[MAX_KEYS];
+		_mouseButtons = new boolean[MAX_MOUSE_BUTTONS];
+		_mouseButtonsPrev = new boolean[MAX_MOUSE_BUTTONS];
+	}
+
+	public void update() {
+		java.lang.System.arraycopy(_keys, 0, _keysPrev, 0, MAX_KEYS);
+		java.lang.System.arraycopy(_mouseButtons, 0, _mouseButtonsPrev, 0, MAX_MOUSE_BUTTONS);
+		_mouseDX = 0f;
+		_mouseDY = 0f;
+		_scrollX = 0f;
+		_scrollY = 0f;
+	}
+
+	public void reset () {
+		for (int i = 0; i < MAX_KEYS; i++) {
+			_keys[i] = false;
+			_keysPrev[i] = false;
+		}
+
+		for (int i = 0; i < MAX_MOUSE_BUTTONS; i++) {
+			_mouseButtons[i] = false;
+			_mouseButtonsPrev[i] = false;
+		}
+
+		_mouseDX = 0f;
+		_mouseDY = 0f;
+		_mouseX = 0f;
+		_mouseY = 0f;
+		_hasMousePosition = false;
+		_scrollX = 0f;
+		_scrollY = 0f;
+	}
+
+	public void setKeyState(int key, boolean pressed) {
+		if (key >= 0 && key < MAX_KEYS) _keys[key] = pressed;
+	}
+
+	public void setMouseButtonState(int button, boolean pressed) {
+		if (button >= 0 && button < MAX_MOUSE_BUTTONS) _mouseButtons[button] = pressed;
+	}
+
+	public void setMousePosition(float x, float y) {
+		if (!_hasMousePosition) {
+			_mouseX = x;
+			_mouseY = y;
+			_mouseDX = 0f;
+			_mouseDY = 0f;
+			_hasMousePosition = true;
+			return;
+		}
+
+		_mouseDX += x - _mouseX;
+		_mouseDY += y - _mouseY;
+		_mouseX = x;
+		_mouseY = y;
+	}
+
+	public void setScrollOffset(float xoffset, float yoffset) {
+		_scrollX += xoffset;
+		_scrollY += yoffset;
+	}
+
+	public void resetMousePositionTracking () {
+		_hasMousePosition = false;
+		_mouseDX = 0f;
+		_mouseDY = 0f;
+	}
+
+	public boolean getKey (int key) {
+		return key >= 0 && key < MAX_KEYS && _keys[key];
+	}
+
+	public boolean getKeyDown (int key) {
+		return key >= 0 && key < MAX_KEYS && _keys[key] && !_keysPrev[key];
+	}
+
+	public boolean getKeyUp (int key) {
+		return key >= 0 && key < MAX_KEYS && !_keys[key] && _keysPrev[key];
+	}
+
+	public boolean getMouseButton (int button) {
+		return button >= 0 && button < MAX_MOUSE_BUTTONS && _mouseButtons[button];
+	}
+
+	public boolean getMouseButtonDown (int button) {
+		return button >= 0 && button < MAX_MOUSE_BUTTONS && _mouseButtons[button] && !_mouseButtonsPrev[button];
+	}
+
+	public boolean getMouseButtonUp (int button) {
+		return button >= 0 && button < MAX_MOUSE_BUTTONS && !_mouseButtons[button] && _mouseButtonsPrev[button];
+	}
+
+	public Vec2 getMousePosition () {
+		return new Vec2(_mouseX, _mouseY);
+	}
+
+	public Vec2 getMouseDelta () {
+		return new Vec2(_mouseDX, _mouseDY);
+	}
+
+	public Vec2 getMouseScroll () {
+		return new Vec2(_scrollX, _scrollY);
+	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.11 -- фрагменты демонстрационной физической сцены PhysicsScene.java}
+\begin{lstlisting}[language=Java, frame=single]
+public final class PhysicsScene {
+    	private static Scene createScene () {
+    		Scene scene = new Scene();
+
+    		scene.addSystem(new ScriptSystem());
+
+    		scene.addSystem(new PhysicsSystem()
+    				.gravity(0f, -9.81f, 0f)
+    				.fixedTimeStep(1f / 60f)
+    				.maxSubSteps(5)
+    				.velocityIterations(12)
+    				.positionIterations(10)
+    				.maxSpeeds(16f, 8f)
+    				.sleepThresholds(0.08f, 0.12f, 0.5f)
+    				.debugDrawColliders(true));
+
+    		scene.addSystem(new RenderSystem()
+    				.ambientColor(new Vec4(0.18f, 0.20f, 0.23f, 1f)));
+
+    		scene.addSystem(new DebugRenderSystem());
+
+    		scene.addEntity(new Entity("sun")
+    				.addComponent(new DirectionalLight()
+    						.direction(-0.4f, -1f, -0.25f)
+    						.color(new Vec4(1f, 0.94f, 0.82f, 1f))
+    						.intensity(1.2f)));
+
+    		scene.addEntity(new Entity("camera")
+    				.addComponent(new Transform()
+    						.position(0f, 4f, 9f)
+    						.rotation(Quaternion.euler(-22f, 0f, 0f)))
+    				.addComponent(new Camera()
+    						.fov(60f)
+    						.near(0.1f)
+    						.far(80f)
+    						.cullingMask(LAYER_WORLD | LAYER_PHYSICS)
+    						.priority(10))
+    				.addComponent(new FreecamController()
+    						.speed(7f)
+    						.sensitivity(18f)));
+
+    		addFloor(scene);
+    		addWall(scene, "left-wall", -4f, 1f, 0f, 0.25f, 1.2f, 4f);
+    		addWall(scene, "right-wall", 4f, 1f, 0f, 0.25f, 1.2f, 4f);
+    		addWall(scene, "back-wall", 0f, 1f, -4f, 4f, 1.2f, 0.25f);
+
+    		addNarrowSupport(scene);
+    		addDynamicBox(scene, "off-center-box", 0.75f, 3.2f, -1.2f, new Vec4(0.25f, 0.68f, 1f, 1f), new Vec3(0f, 0f, 0f));
+
+    		addDynamicBox(scene, "falling-box-a", -1.2f, 4.5f, 0f, new Vec4(0.25f, 0.68f, 1f, 1f), new Vec3(1.6f, 0f, 0f));
+    		addDynamicBox(scene, "falling-box-b", 0.1f, 7f, 0.2f, new Vec4(1f, 0.55f, 0.24f, 1f), new Vec3(-0.6f, 0f, 0.2f));
+    		addDynamicBox(scene, "falling-box-c", 3f, 7f, 0.2f, new Vec4(1f, 0f, 1f, 1f), new Vec3(-0.6f, 0f, 0.2f));
+    		addDynamicBox(scene, "low-bounce-box", 1.4f, 5.8f, -0.5f, new Vec4(0.55f, 1f, 0.32f, 1f), new Vec3(-1.1f, 0f, 0.5f), 0.08f);
+
+    		scene.addEntity(new Entity("kinematic-platform")
+    				.addComponent(new Transform()
+    						.position(0f, 0.35f, 3.1f)
+    						.scale(1.8f, 0.25f, 0.7f))
+    				.addComponent(new Rigidbody()
+    						.type(PhysicsBodyType.KINEMATIC)
+    						.velocity(0.9f, 0f, 0f)
+    						.useGravity(false))
+    				.addComponent(new BoxCollider()
+    						.halfExtents(0.5f, 0.5f, 0.5f)
+    						.friction(0.9f))
+    				.addComponent(new MeshRenderer()
+    						.mesh(Meshes.cube())
+    						.material(new Material().color(new Vec4(1f, 0.9f, 0.28f, 1f)))
+    						.layer(LAYER_PHYSICS)
+    						.boundsRadius(2f))
+    				.addComponent(new PlatformBounceScript(-2.4f, 2.4f)));
+
+    		scene.addEntity(new Entity("physics-grid")
+    				.addComponent(new PhysicsGridScript()));
+
+    		scene.addEntity(new Entity("scene-controls")
+    				.addComponent(new PhysicsSceneControlScript()));
+
+    		return scene;
+    	}
+		
+    	private static void addDynamicBox (Scene scene, String id, float x, float y, float z, Vec4 color, Vec3 velocity) {
+    		addDynamicBox(scene, id, x, y, z, color, velocity, 0.1f);
+    	}
+
+    	private static final class PhysicsSceneControlScript extends Script {
+    		@Override
+    		public void loop (float dtime) {
+    			if (!Input.getKeyDown(KeyCode.R)) return;
+
+    			EngineContext context = EngineContext.current();
+    			context.window().setCursorDisabled();
+    			context.sceneManager().requestReplace(createScene());
+    		}
+    	}
+}
+\end{lstlisting}
+
+\newpage
+\noindent\textbf{Листинг Б.12 -- фрагменты тестирования физической подсистемы PhysicsSystemTest.java}
+\begin{lstlisting}[language=Java, frame=single]
+public final class PhysicsSystemTest {
+    	private static void testOverhangingBoxFallsToFloor () {
+    		Scene scene = new Scene();
+    		scene.addSystem(new PhysicsSystem()
+    				.gravity(0f, -10f, 0f)
+    				.fixedTimeStep(1f / 60f)
+    				.velocityIterations(12)
+    				.positionIterations(10)
+    				.sleepThresholds(0.08f, 0.12f, 0.4f));
+
+    		scene.addEntity(new Entity("floor")
+    				.addComponent(new Transform()
+    						.position(0f, -0.1f, 0f)
+    						.scale(8f, 0.2f, 8f))
+    				.addComponent(new BoxCollider()
+    						.halfExtents(0.5f, 0.5f, 0.5f)
+    						.friction(1f)));
+
+    		scene.addEntity(new Entity("narrow-support")
+    				.addComponent(new Transform()
+    						.position(0f, 0.25f, 0f))
+    				.addComponent(new BoxCollider()
+    						.halfExtents(0.5f, 0.25f, 2f)
+    						.friction(0.9f)));
+
+    		Rigidbody body = new Rigidbody()
+    				.mass(1f)
+    				.linearDamping(0.04f)
+    				.angularDamping(0.08f);
+    		Transform transform = new Transform()
+    				.position(0.82f, 1f, 0f);
+    		scene.addEntity(new Entity("overhanging-box")
+    				.addComponent(transform)
+    				.addComponent(body)
+    				.addComponent(new BoxCollider()
+    						.halfExtents(0.5f, 0.5f, 0.5f)
+    						.friction(0.9f)));
+
+    		scene.init();
+    		for (int i = 0; i < 120; i++)
+    			scene.loop(1f / 60f);
+
+    		if (transform.position().y > 0.8f)
+    			throw new AssertionError("overhanging box stayed glued to the support too long: position="
+    					+ transform.position().x + "," + transform.position().y + "," + transform.position().z
+    					+ " angular=" + body.angularVelocity().x + "," + body.angularVelocity().y + "," + body.angularVelocity().z
+    					+ " sleeping=" + body.sleeping());
+
+    		scene.dispose();
+    	}
+
+    	private static void testWallContactDoesNotGlueFallingBox () {
+    		Scene scene = new Scene();
+    		scene.addSystem(new PhysicsSystem()
+    				.gravity(0f, -10f, 0f)
+    				.fixedTimeStep(1f / 60f)
+    				.velocityIterations(10)
+    				.positionIterations(10)
+    				.maxSpeeds(20f, 10f));
+
+    		scene.addEntity(new Entity("wall")
+    				.addComponent(new Transform()
+    						.position(0f, 2f, 0f)
+    						.scale(0.2f, 5f, 4f))
+    				.addComponent(new BoxCollider()
+    						.halfExtents(0.5f, 0.5f, 0.5f)
+    						.friction(1f)));
+
+    		Rigidbody body = new Rigidbody()
+    				.mass(1f)
+    				.velocity(-0.3f, 0f, 0f)
+    				.linearDamping(0.02f)
+    				.angularDamping(0.08f);
+    		Transform transform = new Transform()
+    				.position(0.55f, 3f, 0f);
+    		scene.addEntity(new Entity("wall-touching-box")
+    				.addComponent(transform)
+    				.addComponent(body)
+    				.addComponent(new BoxCollider()
+    						.halfExtents(0.5f, 0.5f, 0.5f)
+    						.friction(1f)));
+
+    		scene.init();
+    		for (int i = 0; i < 180; i++)
+    			scene.loop(1f / 60f);
+
+    		if (transform.position().y > 1.5f)
+    			throw new AssertionError("box was glued to the wall instead of falling: y=" + transform.position().y);
+
+    		scene.dispose();
+    	}
+
+    	private static void testYawSpinSettlesOnFloor () {
+    		Scene scene = new Scene();
+    		scene.addSystem(new PhysicsSystem()
+    				.gravity(0f, -10f, 0f)
+    				.fixedTimeStep(1f / 60f)
+    				.velocityIterations(12)
+    				.positionIterations(10)
+    				.maxSpeeds(20f, 10f)
+    				.sleepThresholds(0.08f, 0.12f, 0.35f));
+
+    		scene.addEntity(new Entity("ground")
+    				.addComponent(new Transform()
+    						.position(0f, -0.1f, 0f)
+    						.scale(8f, 0.2f, 8f))
+    				.addComponent(new BoxCollider()
+    						.halfExtents(0.5f, 0.5f, 0.5f)
+    						.friction(1f)));
+
+    		Rigidbody body = new Rigidbody()
+    				.mass(1f)
+    				.angularVelocity(0f, 8f, 0f)
+    				.linearDamping(0.05f)
+    				.angularDamping(0.08f);
+    		Transform transform = new Transform()
+    				.position(0f, 0.55f, 0f);
+    		scene.addEntity(new Entity("yaw-spinning-box")
+    				.addComponent(transform)
+    				.addComponent(body)
+    				.addComponent(new BoxCollider()
+    						.halfExtents(0.5f, 0.5f, 0.5f)
+    						.friction(1f)));
+
+    		scene.init();
+    		for (int i = 0; i < 600; i++)
+    			scene.loop(1f / 60f);
+
+    		if (body.angularVelocity().length() > 0.25f)
+    			throw new AssertionError("yaw spinning box did not lose angular velocity");
+    		if (Math.abs(transform.position().x) > 0.4f || Math.abs(transform.position().z) > 0.4f)
+    			throw new AssertionError("yaw spinning box drifted too far");
+
+    		scene.dispose();
+    	}
+
+    	private static void expectNear (String label, float actual, float expected, float tolerance) {
+    		if (Math.abs(actual - expected) > tolerance)
+    			throw new AssertionError(label + ": expected " + expected + " +/- " + tolerance + ", got " + actual);
+    	}
+}
+\end{lstlisting}
+\ifВКР{
+\newpage
+\addcontentsline{toc}{section}{На отдельных листах (CD-RW в прикрепленном конверте)}
+\noindent
+\begin{tabular}{p{5.8cm}C{4.8cm}C{4.8cm}}
+   Автор ВКР & \lhrulefill{\fill} & \fillcenter\Автор \\
+            \setarstrut{\footnotesize}
+           & \footnotesize{(подпись, дата)} & \\
+            \restorearstrut
+   Руководитель ВКР & \lhrulefill{\fill} & \fillcenter\Руководитель \\
+            \setarstrut{\footnotesize}
+           & \footnotesize{(подпись, дата)} & \\
+            \restorearstrut
+   Нормоконтроль & \lhrulefill{\fill} & \fillcenter\Нормоконтроль \\
+            \setarstrut{\footnotesize}
+           & \footnotesize{(подпись, дата)} & \\
+            \restorearstrut
+\end{tabular}
+\vskip 2cm
+\begin{center}
+\textbf{Место для диска}
+\end{center}
+}\fi
